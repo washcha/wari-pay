@@ -8,7 +8,7 @@ import wariPayLogo from '../assets/waripay.png'
 
 const LIFF_ID = import.meta.env.VITE_LIFF_ID
 const NO_LIFF = !LIFF_ID || LIFF_ID === 'your-liff-id-here'
-const IS_DEV_MODE = import.meta.env.DEV && NO_LIFF
+const IS_DEV_MODE = (import.meta.env.DEV && NO_LIFF) || new URLSearchParams(window.location.search).has('mock')
 
 export default function Login() {
   const [loading, setLoading] = useState(false)
