@@ -1,14 +1,17 @@
 import { useState } from 'react'
 import { track } from '../lib/analytics'
-import { LuX, LuPlus } from 'react-icons/lu'
+import { LuX, LuPlus, LuPencilLine, LuShare2 } from 'react-icons/lu'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../contexts/AppContext'
+import InviteSheet from './InviteSheet'
 
 export default function CreateRoomModal({ onClose, onCreated }) {
   const { user } = useApp()
   const [name, setName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [createdRoom, setCreatedRoom] = useState(null)
+  const [showInvite, setShowInvite] = useState(false)
 
   const handleCreate = async () => {
     if (!name.trim()) { setError('請輸入房間名稱'); return }
@@ -25,7 +28,49 @@ export default function CreateRoomModal({ onClose, onCreated }) {
 
     await supabase.from('room_members').insert({ room_id: room.id, user_id: user.id })
     track('create_room_success')
-    onCreated(room)
+    setCreatedRoom(room)
+    setLoading(false)
+  }
+
+  if (showInvite && createdRoom) {
+    return (
+      <InviteSheet
+        roomId={createdRoom.id}
+        roomName={createdRoom.name}
+        onClose={() => onCreated(createdRoom)}
+      />
+    )
+  }
+
+  if (createdRoom) {
+    return (
+      <div className="fixed inset-0 bg-black/50 z-50 flex items-end justify-center">
+        <div className="bg-white rounded-t-[32px] w-full max-w-[480px] p-6">
+          <div className="w-10 h-1 bg-brand-mint rounded-full mx-auto mb-6" />
+          <div className="text-center mb-6">
+            <div className="text-4xl mb-3">🐸</div>
+            <h2 className="text-xl font-bold text-brand-deep mb-1">「{createdRoom.name}」建立成功！</h2>
+            <p className="text-brand-mid/70 text-sm">你想怎麼開始？</p>
+          </div>
+          <div className="space-y-3">
+            <button
+              onClick={() => setShowInvite(true)}
+              className="w-full bg-brand-lime text-brand-deep font-bold py-4 rounded-2xl flex items-center justify-center gap-2 hover:brightness-95 transition"
+            >
+              <LuShare2 className="w-5 h-5" />
+              邀請朋友一起分帳
+            </button>
+            <button
+              onClick={() => onCreated(createdRoom)}
+              className="w-full bg-brand-mint text-brand-deep font-semibold py-4 rounded-2xl flex items-center justify-center gap-2 hover:brightness-95 transition"
+            >
+              <LuPencilLine className="w-5 h-5" />
+              我先自己記帳
+            </button>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (

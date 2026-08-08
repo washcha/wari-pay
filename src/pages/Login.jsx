@@ -17,6 +17,7 @@ export default function Login() {
   const { signIn } = useApp()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const hasPendingJoin = !!(searchParams.get('join') || sessionStorage.getItem('pendingJoin'))
 
   // AppContext handles LIFF auto-login on startup; Login page only handles
   // the button click for users not yet logged in to LINE.
@@ -31,7 +32,7 @@ export default function Login() {
       track('login_success')
       const joinRoomId = searchParams.get('join') || sessionStorage.getItem('pendingJoin')
       sessionStorage.removeItem('pendingJoin')
-      navigate(joinRoomId ? `/room/${joinRoomId}` : '/')
+      navigate(joinRoomId ? `/?join=${joinRoomId}` : '/', { replace: true })
     } catch (err) {
       track('login_error', { message: err.message })
       setError(err.message || '登入失敗，請再試一次')
@@ -82,6 +83,11 @@ export default function Login() {
         <p className="text-brand-mid/70 text-sm">哇哩 · 免下載 App，在 LINE 直接分帳</p>
       </div>
 
+      {hasPendingJoin && (
+        <div className="w-full max-w-sm mb-4 bg-brand-lime/80 text-brand-deep text-sm font-medium rounded-2xl px-4 py-3 text-center">
+          🐸 朋友邀請你加入分帳房間，登入後自動加入！
+        </div>
+      )}
       <div className="w-full max-w-sm bg-white rounded-3xl shadow-soft p-8">
         {IS_DEV_MODE ? (
           <>
