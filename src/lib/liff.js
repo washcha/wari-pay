@@ -72,6 +72,13 @@ export const shareInviteCard = async (roomName, inviteUrl) => {
             body: { backgroundColor: '#F5F7F4' },
             footer: { backgroundColor: '#F5F7F4', separator: false },
           },
+          hero: {
+            type: 'image',
+            url: 'https://www.washcc.cc/og-image.png',
+            size: 'full',
+            aspectRatio: '20:11',
+            aspectMode: 'cover',
+          },
           body: {
             type: 'box',
             layout: 'vertical',
