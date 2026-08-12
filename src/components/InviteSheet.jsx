@@ -14,8 +14,9 @@ export default function InviteSheet({ roomId, roomName, onClose }) {
 
   const handleShareCard = async () => {
     setSharing(true)
-    await shareInviteCard(roomName, inviteUrl)
+    const ok = await shareInviteCard(roomName, inviteUrl)
     setSharing(false)
+    if (!ok) copyUrl()
   }
 
   const copyUrl = async () => {

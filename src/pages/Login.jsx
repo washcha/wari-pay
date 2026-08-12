@@ -68,7 +68,7 @@ export default function Login() {
       const { error: err } = await signIn(getMockProfile(index))
       if (err) throw err
       const joinRoomId = searchParams.get('join')
-      navigate(joinRoomId ? `/room/${joinRoomId}` : '/')
+      navigate(joinRoomId ? `/?join=${joinRoomId}` : '/')
     } catch (err) {
       setError(err.message || '登入失敗')
     } finally {
