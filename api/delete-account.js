@@ -29,38 +29,30 @@ export default async function handler(req, res) {
   const lineUserId = authUser.app_metadata?.line_user_id
   if (!lineUserId) return res.status(400).json({ error: 'Cannot resolve LINE user ID' })
 
-  // 1. Find all expenses paid by this user (to cascade-delete their splits)
-  const { data: paidExpenses } = await admin
-    .from('expenses')
-    .select('id')
-    .eq('paid_by', lineUserId)
+  // Keep accounting rows immutable: expenses, splits, payers, and settlements
+  // remain as historical ledger records even after the account is deleted.
 
-  const paidExpenseIds = (paidExpenses || []).map(e => e.id)
-
-  // 2. Delete splits of expenses this user paid
-  if (paidExpenseIds.length > 0) {
-    await admin.from('expense_splits').delete().in('expense_id', paidExpenseIds)
-  }
-
-  // 3. Delete this user's share in other people's expenses
-  await admin.from('expense_splits').delete().eq('user_id', lineUserId)
-
-  // 4. Delete expenses paid by this user
-  await admin.from('expenses').delete().eq('paid_by', lineUserId)
-
-  // 5. Delete settlement payment records
-  await admin.from('settlement_payments').delete().eq('payer_id', lineUserId)
-
-  // 6. Disown rooms created by this user (leave them intact for other members)
+  // 1. Disown rooms created by this user (leave them intact for other members)
   await admin.from('rooms').update({ created_by: null }).eq('created_by', lineUserId)
 
-  // 7. Remove from all room_members
-  await admin.from('room_members').delete().eq('user_id', lineUserId)
+  // 2. Mark memberships inactive so the user no longer appears in new expense forms.
+  await admin
+    .from('room_members')
+    .update({ left_at: new Date().toISOString() })
+    .eq('user_id', lineUserId)
+    .is('left_at', null)
 
-  // 8. Delete from users table
-  await admin.from('users').delete().eq('id', lineUserId)
+  // 3. Anonymize the profile but keep the users row for foreign-key history.
+  await admin
+    .from('users')
+    .update({
+      display_name: '已離開的成員',
+      picture_url: null,
+      deleted_at: new Date().toISOString(),
+    })
+    .eq('id', lineUserId)
 
-  // 9. Delete Supabase auth user
+  // 4. Delete Supabase auth user so the account can no longer authenticate.
   const { error: deleteAuthError } = await admin.auth.admin.deleteUser(authUser.id)
   if (deleteAuthError) {
     return res.status(500).json({ error: `Auth delete failed: ${deleteAuthError.message}` })

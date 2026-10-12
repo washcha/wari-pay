@@ -1,11 +1,14 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { useEffect } from 'react'
 import waripayLoading from './assets/waripay_loading.png'
 import { AppProvider, useApp } from './contexts/AppContext'
+import { track } from './lib/analytics'
 import { initGA } from './lib/analytics'
 import Login from './pages/Login'
 import Home from './pages/Home'
 import RoomPage from './pages/RoomPage'
 import PrivacyPolicy from './pages/PrivacyPolicy'
+import Hub from './pages/Hub'
 
 initGA()
 
@@ -29,7 +32,18 @@ function ProtectedRoute({ children }) {
 }
 
 function AppRoutes() {
-  const { user, loading } = useApp()
+  const { user, loading, language } = useApp()
+  const location = useLocation()
+
+  useEffect(() => {
+    track('page_view', {
+      language,
+      page_path: location.pathname + location.search,
+      page_location: window.location.href,
+      page_title: document.title,
+    })
+  }, [language, location.pathname, location.search])
+
   if (loading) return <Spinner />
 
   return (
@@ -44,6 +58,9 @@ function AppRoutes() {
 }
 
 export default function App() {
+  const isHubHost = window.location.hostname === 'www.washcc.cc' || window.location.hostname === 'washcc.cc'
+  if (isHubHost) return <Hub />
+
   return (
     <AppProvider>
       <BrowserRouter>

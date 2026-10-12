@@ -22,6 +22,7 @@ CREATE TABLE users (
   id            VARCHAR PRIMARY KEY,        -- LINE userId
   display_name  VARCHAR NOT NULL,           -- LINE 暱稱
   picture_url   TEXT,                       -- LINE 頭像
+  deleted_at    TIMESTAMP WITH TIME ZONE,    -- 帳號刪除/匿名化時間；保留 row 讓歷史帳務可追溯
   created_at    TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -30,6 +31,7 @@ CREATE TABLE rooms (
   id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   name        VARCHAR NOT NULL,
   created_by  VARCHAR REFERENCES users(id),
+  base_currency VARCHAR NOT NULL DEFAULT 'TWD',
   created_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -39,6 +41,7 @@ CREATE TABLE room_members (
   room_id    UUID REFERENCES rooms(id) ON DELETE CASCADE,
   user_id    VARCHAR REFERENCES users(id) ON DELETE CASCADE,
   joined_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  left_at    TIMESTAMP WITH TIME ZONE,       -- NULL = active；有時間代表已離開但保留歷史帳務
   UNIQUE(room_id, user_id)
 );
 
@@ -64,24 +67,37 @@ CREATE TABLE expense_splits (
   created_at    TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- 6. 費用付款明細（新資料用；舊資料仍 fallback 到 expenses.paid_by）
+CREATE TABLE expense_payers (
+  id           UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  expense_id   UUID NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
+  user_id      VARCHAR NOT NULL REFERENCES users(id),
+  amount_paid  NUMERIC(12, 2) NOT NULL CHECK (amount_paid > 0),
+  created_at   TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(expense_id, user_id)
+);
+
 -- Row Level Security（MVP 先全開，正式上線後搭配 Supabase Auth 收緊）
 ALTER TABLE users          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE rooms          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE room_members   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE expenses       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE expense_splits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE expense_payers ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "public_users"          ON users          FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "public_rooms"          ON rooms          FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "public_room_members"   ON room_members   FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "public_expenses"       ON expenses       FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "public_expense_splits" ON expense_splits FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "public_expense_payers" ON expense_payers FOR ALL USING (true) WITH CHECK (true);
 
 -- ============================================================
 -- 結算邏輯備忘（前端直接 query，不需要 stored procedure）
 --
 -- 某月某房間每人差額：
---   paid  = SELECT SUM(amount) FROM expenses WHERE room_id=? AND paid_by=user_id AND expense_date BETWEEN ...
+--   paid  = SELECT SUM(amount_paid) FROM expense_payers JOIN expenses ...
+--           fallback: SELECT SUM(amount) FROM expenses WHERE paid_by=user_id AND expense has no payer rows
 --   owed  = SELECT SUM(split_amount) FROM expense_splits WHERE expense_id IN (月內 expenses.id) AND user_id=?
 --   delta = paid - owed
 --   > 0  → 可收回（幫大家墊了錢）

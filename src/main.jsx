@@ -5,6 +5,7 @@ import './index.css'
 
 const LIFF_ID = import.meta.env.VITE_LIFF_ID
 const NO_LIFF = !LIFF_ID || LIFF_ID === 'your-liff-id-here'
+const IS_APP_HOST = window.location.hostname === 'app.wari-pay.washcc.cc' || window.location.hostname === 'localhost'
 
 const mount = () => {
   ReactDOM.createRoot(document.getElementById('root')).render(
@@ -14,7 +15,7 @@ const mount = () => {
   )
 }
 
-if (NO_LIFF || import.meta.env.DEV) {
+if (!IS_APP_HOST || NO_LIFF || import.meta.env.DEV) {
   mount()
 } else {
   // 先跑 liff.init() 再掛載 React，避免 React Router 搶走 URL 參數

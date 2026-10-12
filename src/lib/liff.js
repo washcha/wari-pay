@@ -30,11 +30,15 @@ export const getLiffProfile = async (liff) => {
   }
 }
 
+export const getLiffAccessToken = (liff) => liff.getAccessToken?.() || null
+
 export const MOCK_USERS = [
+  { userId: 'dev_test_001', displayName: '測試帳號', pictureUrl: null },
   { userId: 'dev_user_001', displayName: '小明（你）', pictureUrl: null },
   { userId: 'dev_user_002', displayName: '小華',       pictureUrl: null },
   { userId: 'dev_user_003', displayName: '小美',       pictureUrl: null },
   { userId: 'dev_user_004', displayName: '阿強',       pictureUrl: null },
+  { userId: 'dev_user_mina', displayName: 'Mina',      pictureUrl: null },
 ]
 
 export const getMockProfile = (index = 0) => MOCK_USERS[index]
@@ -58,14 +62,22 @@ export const openLineShare = (text) => {
   }
 }
 
-export const shareInviteCard = async (roomName, inviteUrl) => {
+export const shareInviteCard = async (roomName, inviteUrl, copy = {}) => {
   if (!_liff?.isInClient()) return false
   if (!_liff.isApiAvailable('shareTargetPicker')) return false
+  const cardCopy = {
+    altText: `Join "${roomName}" on Wari Pay`,
+    brand: '🐸 Wari Pay',
+    title: `Join "${roomName}"`,
+    desc: 'Tap the button to join. No app download needed.',
+    button: 'Join Room',
+    ...copy,
+  }
   try {
     const result = await _liff.shareTargetPicker([
       {
         type: 'flex',
-        altText: `邀請你加入「${roomName}」— 哇哩 Wari Pay`,
+        altText: cardCopy.altText,
         contents: {
           type: 'bubble',
           styles: {
@@ -85,9 +97,9 @@ export const shareInviteCard = async (roomName, inviteUrl) => {
             spacing: 'sm',
             paddingAll: 'lg',
             contents: [
-              { type: 'text', text: '🐸 哇哩 Wari Pay', weight: 'bold', size: 'xl', color: '#144516' },
-              { type: 'text', text: `邀請你加入「${roomName}」`, size: 'sm', color: '#416943', margin: 'sm' },
-              { type: 'text', text: '點下方按鈕即可加入，無需下載 App', size: 'xs', color: '#416943', wrap: true },
+              { type: 'text', text: cardCopy.brand, weight: 'bold', size: 'xl', color: '#144516' },
+              { type: 'text', text: cardCopy.title, size: 'sm', color: '#416943', margin: 'sm', wrap: true },
+              { type: 'text', text: cardCopy.desc, size: 'xs', color: '#416943', wrap: true },
             ],
           },
           footer: {
@@ -100,7 +112,7 @@ export const shareInviteCard = async (roomName, inviteUrl) => {
                 type: 'button',
                 style: 'primary',
                 color: '#144516',
-                action: { type: 'uri', label: '加入房間', uri: inviteUrl },
+                action: { type: 'uri', label: cardCopy.button, uri: inviteUrl },
               },
             ],
           },

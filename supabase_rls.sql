@@ -30,6 +30,7 @@ AS $$
     SELECT 1 FROM room_members
     WHERE room_id = p_room_id
       AND user_id = public.current_line_user_id()
+      AND left_at IS NULL
   );
 $$;
 
@@ -41,6 +42,7 @@ DROP POLICY IF EXISTS "public_rooms"          ON rooms;
 DROP POLICY IF EXISTS "public_room_members"   ON room_members;
 DROP POLICY IF EXISTS "public_expenses"       ON expenses;
 DROP POLICY IF EXISTS "public_expense_splits" ON expense_splits;
+DROP POLICY IF EXISTS "room_members_update"   ON room_members;
 
 -- ============================================================
 -- 3. users：登入用戶都能讀（顯示室友資訊），只能改自己
@@ -84,7 +86,9 @@ CREATE POLICY "rooms_delete_creator" ON rooms
 -- ============================================================
 CREATE POLICY "room_members_select" ON room_members
   FOR SELECT TO authenticated
-  USING (is_room_member(room_id));
+  USING (
+    user_id = current_line_user_id() OR is_room_member(room_id)
+  );
 
 CREATE POLICY "room_members_insert" ON room_members
   FOR INSERT TO authenticated
@@ -95,6 +99,15 @@ CREATE POLICY "room_members_insert" ON room_members
 CREATE POLICY "room_members_delete" ON room_members
   FOR DELETE TO authenticated
   USING (
+    user_id = current_line_user_id() OR is_room_member(room_id)
+  );
+
+CREATE POLICY "room_members_update" ON room_members
+  FOR UPDATE TO authenticated
+  USING (
+    user_id = current_line_user_id() OR is_room_member(room_id)
+  )
+  WITH CHECK (
     user_id = current_line_user_id() OR is_room_member(room_id)
   );
 
@@ -166,7 +179,79 @@ CREATE POLICY "expense_splits_delete" ON expense_splits
   );
 
 -- ============================================================
--- 8. settlement_payments：如果表存在就加上政策（房間成員可看；只能 CRUD 自己的結算記錄）
+-- 8. expense_payers：透過 expense → room 判斷
+-- ============================================================
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'expense_payers'
+  ) THEN
+    EXECUTE 'ALTER TABLE expense_payers ENABLE ROW LEVEL SECURITY';
+    EXECUTE 'DROP POLICY IF EXISTS "expense_payers_select" ON expense_payers';
+    EXECUTE 'DROP POLICY IF EXISTS "expense_payers_insert" ON expense_payers';
+    EXECUTE 'DROP POLICY IF EXISTS "expense_payers_update" ON expense_payers';
+    EXECUTE 'DROP POLICY IF EXISTS "expense_payers_delete" ON expense_payers';
+
+    EXECUTE $p$
+      CREATE POLICY "expense_payers_select" ON expense_payers
+        FOR SELECT TO authenticated
+        USING (
+          EXISTS (
+            SELECT 1 FROM expenses e
+            WHERE e.id = expense_payers.expense_id
+              AND is_room_member(e.room_id)
+          )
+        )
+    $p$;
+
+    EXECUTE $p$
+      CREATE POLICY "expense_payers_insert" ON expense_payers
+        FOR INSERT TO authenticated
+        WITH CHECK (
+          EXISTS (
+            SELECT 1 FROM expenses e
+            WHERE e.id = expense_payers.expense_id
+              AND is_room_member(e.room_id)
+          )
+        )
+    $p$;
+
+    EXECUTE $p$
+      CREATE POLICY "expense_payers_update" ON expense_payers
+        FOR UPDATE TO authenticated
+        USING (
+          EXISTS (
+            SELECT 1 FROM expenses e
+            WHERE e.id = expense_payers.expense_id
+              AND is_room_member(e.room_id)
+          )
+        )
+        WITH CHECK (
+          EXISTS (
+            SELECT 1 FROM expenses e
+            WHERE e.id = expense_payers.expense_id
+              AND is_room_member(e.room_id)
+          )
+        )
+    $p$;
+
+    EXECUTE $p$
+      CREATE POLICY "expense_payers_delete" ON expense_payers
+        FOR DELETE TO authenticated
+        USING (
+          EXISTS (
+            SELECT 1 FROM expenses e
+            WHERE e.id = expense_payers.expense_id
+              AND is_room_member(e.room_id)
+          )
+        )
+    $p$;
+  END IF;
+END $$;
+
+-- ============================================================
+-- 9. settlement_payments：如果表存在就加上政策（房間成員可看；只能 CRUD 自己的結算記錄）
 -- ============================================================
 DO $$
 BEGIN
@@ -224,8 +309,13 @@ END $$;
 -- DROP POLICY IF EXISTS "expense_splits_insert" ON expense_splits;
 -- DROP POLICY IF EXISTS "expense_splits_update" ON expense_splits;
 -- DROP POLICY IF EXISTS "expense_splits_delete" ON expense_splits;
+-- DROP POLICY IF EXISTS "expense_payers_select" ON expense_payers;
+-- DROP POLICY IF EXISTS "expense_payers_insert" ON expense_payers;
+-- DROP POLICY IF EXISTS "expense_payers_update" ON expense_payers;
+-- DROP POLICY IF EXISTS "expense_payers_delete" ON expense_payers;
 -- CREATE POLICY "public_users"          ON users          FOR ALL USING (true) WITH CHECK (true);
 -- CREATE POLICY "public_rooms"          ON rooms          FOR ALL USING (true) WITH CHECK (true);
 -- CREATE POLICY "public_room_members"   ON room_members   FOR ALL USING (true) WITH CHECK (true);
 -- CREATE POLICY "public_expenses"       ON expenses       FOR ALL USING (true) WITH CHECK (true);
 -- CREATE POLICY "public_expense_splits" ON expense_splits FOR ALL USING (true) WITH CHECK (true);
+-- CREATE POLICY "public_expense_payers" ON expense_payers FOR ALL USING (true) WITH CHECK (true);

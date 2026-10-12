@@ -13,6 +13,10 @@ export function setAuthToken(token) {
   _token = token
 }
 
+export function hasAuthToken() {
+  return Boolean(_token)
+}
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   global: {
     fetch: (url, options = {}) => {

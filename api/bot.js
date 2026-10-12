@@ -1,4 +1,4 @@
-import { createHmac } from 'crypto'
+import { createHmac, timingSafeEqual } from 'crypto'
 
 const LINE_API = 'https://api.line.me/v2/bot'
 const TRIGGER_KEYWORDS = ['記帳', '/記帳', 'waripay', 'wari', '哇哩']
@@ -18,7 +18,9 @@ async function getRawBody(req) {
 
 function verifySignature(rawBody, signature, secret) {
   const digest = createHmac('sha256', secret).update(rawBody).digest('base64')
-  return digest === signature
+  const digestBuffer = Buffer.from(digest)
+  const signatureBuffer = Buffer.from(signature || '')
+  return digestBuffer.length === signatureBuffer.length && timingSafeEqual(digestBuffer, signatureBuffer)
 }
 
 async function replyMessage(replyToken, messages, channelToken) {

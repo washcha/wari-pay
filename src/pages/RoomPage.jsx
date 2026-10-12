@@ -18,29 +18,18 @@ import ExpensesTab from '../tabs/ExpensesTab'
 import SettlementTab from '../tabs/SettlementTab'
 import MonthlyTab from '../tabs/MonthlyTab'
 import InviteSheet from '../components/InviteSheet'
+import Avatar from '../components/Avatar'
 
 const TABS = [
-  { key: 'expenses', label: '帳單', Icon: LuReceipt },
-  { key: 'settlement', label: '結算', Icon: LuArrowRightLeft },
-  { key: 'monthly', label: '月報', Icon: LuChartColumn },
+  { key: 'expenses', labelKey: 'room.tabsExpenses', Icon: LuReceipt },
+  { key: 'settlement', labelKey: 'room.tabsSettlement', Icon: LuArrowRightLeft },
+  { key: 'monthly', labelKey: 'room.tabsMonthly', Icon: LuChartColumn },
 ]
-
-function Avatar({ src, name }) {
-  const fallback = `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=144516&color=B0EC70`
-  return (
-    <img
-      src={src || fallback}
-      alt={name}
-      className="w-9 h-9 rounded-full border-2 border-white object-cover flex-shrink-0"
-      onError={e => { e.target.src = fallback }}
-    />
-  )
-}
 
 export default function RoomPage() {
   const { roomId } = useParams()
   const navigate = useNavigate()
-  const { user } = useApp()
+  const { user, t } = useApp()
   const [tab, setTab] = useState('expenses')
   const [room, setRoom] = useState(null)
   const [members, setMembers] = useState([])
@@ -55,9 +44,41 @@ export default function RoomPage() {
   useEffect(() => { fetchRoomData() }, [roomId])
 
   const fetchRoomData = async () => {
-    const { error: joinError } = await supabase
+    if (import.meta.env.DEV && roomId.startsWith('local-demo-')) {
+      const savedRoom = localStorage.getItem(`roomiepay_demo_room_${roomId}`)
+      const demoRoom = savedRoom ? JSON.parse(savedRoom) : {
+        id: roomId,
+        name: 'Local demo room',
+        created_by: user.id,
+        base_currency: 'TWD',
+        created_at: new Date().toISOString(),
+      }
+      setMembers([
+        user,
+        { id: 'local-demo-friend', display_name: '有順', picture_url: null },
+        { id: 'local-demo-friend-2', display_name: '小安', picture_url: null },
+        { id: 'local-demo-friend-3', display_name: 'Mina', picture_url: null },
+        { id: 'local-demo-friend-4', display_name: 'Ren', picture_url: null },
+        { id: 'local-demo-friend-5', display_name: 'Emma', picture_url: null },
+        { id: 'local-demo-friend-6', display_name: 'Jiho', picture_url: null },
+      ])
+      setRoom(demoRoom)
+      setLoading(false)
+      return
+    }
+
+    const { data: existingMembership } = await supabase
       .from('room_members')
-      .insert({ room_id: roomId, user_id: user.id })
+      .select('id, left_at')
+      .eq('room_id', roomId)
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    const { error: joinError } = existingMembership?.left_at
+      ? await supabase.from('room_members').update({ left_at: null }).eq('id', existingMembership.id)
+      : !existingMembership
+        ? await supabase.from('room_members').insert({ room_id: roomId, user_id: user.id })
+        : { error: null }
 
     if (joinError && joinError.code !== '23505') {
       navigate('/')
@@ -66,13 +87,16 @@ export default function RoomPage() {
 
     const [{ data: roomData, error }, { data: membersData }] = await Promise.all([
       supabase.from('rooms').select('*').eq('id', roomId).single(),
-      supabase.from('room_members').select('user_id, users(id, display_name, picture_url)').eq('room_id', roomId),
+      supabase.from('room_members').select('user_id, left_at, users(id, display_name, picture_url)').eq('room_id', roomId),
     ])
 
     if (error || !roomData) { navigate('/'); return }
 
-    setMembers(membersData?.map(m => m.users).filter(Boolean) || [])
-    setRoom(roomData)
+    setMembers(membersData?.map(m => m.users ? { ...m.users, left_at: m.left_at } : null).filter(Boolean) || [])
+    setRoom({
+      ...roomData,
+      base_currency: roomData.base_currency || 'TWD',
+    })
     setLoading(false)
   }
 
@@ -91,16 +115,16 @@ export default function RoomPage() {
   }
 
   const leaveRoom = async () => {
-    if (!window.confirm('確定要退出此房間嗎？')) return
+    if (!window.confirm(t('room.leaveConfirm'))) return
     setShowRoomMenu(false)
-    await supabase.from('room_members').delete()
+    await supabase.from('room_members').update({ left_at: new Date().toISOString() })
       .eq('room_id', roomId)
       .eq('user_id', user.id)
     navigate('/')
   }
 
   const deleteRoom = async () => {
-    if (!window.confirm(`確定要刪除「${room.name}」嗎？\n所有費用紀錄也會一併刪除，此操作無法復原。`)) return
+    if (!window.confirm(t('room.deleteConfirm', { name: room.name }))) return
     setShowRoomMenu(false)
     await supabase.from('rooms').delete().eq('id', roomId)
     navigate('/')
@@ -115,6 +139,7 @@ export default function RoomPage() {
   }
 
   const isAdmin = room.created_by === user.id
+  const activeMembers = members.filter(member => !member.left_at)
 
   return (
     <div className="min-h-screen bg-brand-cream flex flex-col">
@@ -132,11 +157,11 @@ export default function RoomPage() {
                 onBlur={saveRoomName}
                 onKeyDown={e => { if (e.key === 'Enter') saveRoomName(); if (e.key === 'Escape') setEditingName(false) }}
                 className="bg-white/15 text-white font-bold text-lg rounded-lg px-2 py-0.5 outline-none w-full placeholder-brand-mint/60"
-                placeholder="輸入房間名稱"
+                placeholder={t('room.namePlaceholder')}
               />
             ) : (
               <button onClick={startEditName} className="text-left w-full flex items-center gap-1.5">
-                <h1 className="font-bold text-lg truncate">{room.name}</h1>
+                <h1 className="font-bold text-lg truncate min-w-0">{room.name}</h1>
                 <LuPencil className="w-3.5 h-3.5 text-brand-mint/70 flex-shrink-0" />
               </button>
             )}
@@ -148,13 +173,13 @@ export default function RoomPage() {
               className="bg-brand-mint text-brand-deep text-sm font-bold px-3.5 py-1.5 rounded-full flex items-center gap-1.5"
             >
               <LuUserPlus className="w-4 h-4" />
-              邀請
+              {t('room.invite')}
             </button>
-            {!tipDismissed && members.length === 1 && (
+            {!tipDismissed && activeMembers.length === 1 && (
               <div className="absolute right-0 top-full mt-2 z-40">
                 <div className="absolute right-4 -top-1.5 w-3 h-3 bg-brand-lime rotate-45 rounded-sm" />
                 <div className="bg-brand-lime text-brand-deep text-xs font-semibold px-3 py-2 rounded-2xl shadow-soft whitespace-nowrap">
-                  要分帳記得先邀請朋友加入！
+                  {t('room.inviteTip')}
                 </div>
               </div>
             )}
@@ -173,14 +198,14 @@ export default function RoomPage() {
                   onClick={leaveRoom}
                   className="flex items-center gap-2 w-full px-4 py-3 text-sm text-brand-deep hover:bg-brand-mint/50"
                 >
-                  <LuLogOut className="w-4 h-4" /> 退出房間
+                  <LuLogOut className="w-4 h-4" /> {t('room.leaveRoom')}
                 </button>
                 {isAdmin && (
                   <button
                     onClick={deleteRoom}
                     className="flex items-center gap-2 w-full px-4 py-3 text-sm text-red-500 hover:bg-red-50"
                   >
-                    <LuTrash2 className="w-4 h-4" /> 刪除房間
+                    <LuTrash2 className="w-4 h-4" /> {t('room.deleteRoom')}
                   </button>
                 )}
               </div>
@@ -190,48 +215,48 @@ export default function RoomPage() {
 
         <div className="flex items-center mb-3 gap-2">
           <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide flex-1">
-            {members.slice(0, 7).map(m => (
+            {activeMembers.slice(0, 7).map(m => (
               <div key={m.id} className="flex flex-col items-center gap-1 flex-shrink-0">
-                <Avatar src={m.picture_url} name={m.display_name} />
+                <Avatar src={m.picture_url} name={m.display_name} userId={m.id} className="w-9 h-9" imageClassName="border-2 border-white" />
                 <span className="text-xs text-brand-mint/80 w-10 truncate text-center block">
                   {m.display_name.split(' ')[0]}
                 </span>
               </div>
             ))}
-            {members.length > 7 && (
+            {activeMembers.length > 7 && (
               <div className="flex flex-col items-center gap-1 flex-shrink-0">
                 <div className="w-9 h-9 rounded-full bg-brand-mid/50 flex items-center justify-center text-xs text-white font-bold border-2 border-white">
-                  +{members.length - 7}
+                  +{activeMembers.length - 7}
                 </div>
-                <span className="text-xs text-brand-mint/80 w-10 text-center block">更多</span>
+                <span className="text-xs text-brand-mint/80 w-10 text-center block">{t('room.more')}</span>
               </div>
             )}
           </div>
-          <span className="text-xs text-brand-mint/70 flex-shrink-0">{members.length} 位成員</span>
+          <span className="text-xs text-brand-mint/70 flex-shrink-0">{t('room.members', { count: activeMembers.length })}</span>
         </div>
 
         <div className="flex">
-          {TABS.map(t => (
+          {TABS.map(tabItem => (
             <button
-              key={t.key}
-              onClick={() => { setTab(t.key); track('tab_change', { tab: t.key }) }}
+              key={tabItem.key}
+              onClick={() => { setTab(tabItem.key); track('tab_change', { tab: tabItem.key }) }}
               className={`flex-1 py-3 text-sm font-medium transition-colors flex items-center justify-center gap-1.5 ${
-                tab === t.key
+                tab === tabItem.key
                   ? 'text-brand-lime border-b-2 border-brand-lime'
                   : 'text-brand-mint/60'
               }`}
             >
-              <t.Icon className="w-4 h-4" />
-              {t.label}
+              <tabItem.Icon className="w-4 h-4" />
+              {t(tabItem.labelKey)}
             </button>
           ))}
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {tab === 'expenses' && <ExpensesTab roomId={roomId} members={members} />}
-        {tab === 'settlement' && <SettlementTab roomId={roomId} members={members} />}
-        {tab === 'monthly' && <MonthlyTab roomId={roomId} members={members} />}
+        {tab === 'expenses' && <ExpensesTab roomId={roomId} members={members} activeMembers={activeMembers} roomCurrency={room.base_currency} />}
+        {tab === 'settlement' && <SettlementTab roomId={roomId} members={members} roomCurrency={room.base_currency} />}
+        {tab === 'monthly' && <MonthlyTab roomId={roomId} members={members} roomCurrency={room.base_currency} />}
       </div>
 
       {showRoomMenu && (
