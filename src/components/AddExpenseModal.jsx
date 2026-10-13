@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { track } from '../lib/analytics'
-import { LuX, LuCheck, LuPencilLine, LuChevronDown } from 'react-icons/lu'
+import { LuX, LuCheck, LuPencilLine, LuChevronDown, LuSlidersHorizontal, LuPlus } from 'react-icons/lu'
 import { hasAuthToken, supabase } from '../lib/supabase'
+import { computeSplits } from '../lib/splitCalc'
 import { useApp } from '../contexts/AppContext'
 import { sendExpenseMessage } from '../lib/liff'
 import Avatar from './Avatar'
@@ -35,6 +36,25 @@ const getPositivePayers = (expense) =>
   expense?.expense_payers?.filter(payer => parseFloat(payer.amount_paid || 0) > 0) || []
 
 const hasMultiplePayers = (expense) => getPositivePayers(expense).length > 1
+
+const detectCustomSplit = (expense) => {
+  const splits = expense?.expense_splits || []
+  if (splits.length < 2) return false
+  const amounts = splits.map(s => parseFloat(s.split_amount || 0))
+  const first = amounts[0]
+  return amounts.some(a => Math.abs(a - first) >= 0.01)
+}
+
+const buildInitialCustomSplits = (expense) => {
+  const splits = expense?.expense_splits || []
+  const map = {}
+  splits.forEach(s => {
+    map[s.user_id] = s.split_amount !== null && s.split_amount !== undefined
+      ? String(s.split_amount)
+      : ''
+  })
+  return map
+}
 
 const buildInitialPayerRows = (members, expense, userId) => {
   const savedPayers = getPositivePayers(expense)
@@ -70,6 +90,9 @@ export default function AddExpenseModal({ roomId, members, onClose, onAdded, exp
     paymentMode: hasMultiplePayers(expense) ? 'multiple' : 'single',
     payerRows: buildInitialPayerRows(members, expense, user.id),
     splitAmong: expense?.expense_splits?.map(s => s.user_id) || members.map(m => m.id),
+    splitMode: detectCustomSplit(expense) ? 'custom' : 'equal',
+    customSplits: buildInitialCustomSplits(expense),
+    autoFilledUids: [],
     note: expense?.note || '',
     date: expense?.expense_date || new Date().toISOString().split('T')[0],
   })
@@ -105,6 +128,18 @@ export default function AddExpenseModal({ roomId, members, onClose, onAdded, exp
   const payerDiff = parsedAmount - payerTotal
   const usedPayerIds = form.payerRows.map(row => row.userId).filter(Boolean)
   const canAddPayer = usedPayerIds.length < members.length
+  const splitCalc = computeSplits({
+    amount: parsedAmount,
+    splitAmong: form.splitAmong,
+    customSplits: form.customSplits,
+    autoFilledUids: form.autoFilledUids,
+  })
+  const effectiveSplits = splitCalc.effectiveSplits
+  const splitTotal = form.splitMode === 'custom' ? splitCalc.allocated : parsedAmount
+  const splitDiff = form.splitMode === 'custom' ? splitCalc.diff : 0
+  const isCustomSplitValid = form.splitMode === 'equal'
+    || (form.splitAmong.length > 0 && parsedAmount > 0 && Math.abs(splitDiff) < 0.01)
+  const hasEmptySplitSlot = splitCalc.hasEmptySlot
 
   useEffect(() => {
     const fetchRoomDisplayRate = async () => {
@@ -145,6 +180,7 @@ export default function AddExpenseModal({ roomId, members, onClose, onAdded, exp
     setRateFetching(false)
   }
 
+  // Toggle: don't erase stored amounts; keep auto flags so re-check restores behavior.
   const toggleSplit = (id) =>
     setForm(f => ({
       ...f,
@@ -152,6 +188,41 @@ export default function AddExpenseModal({ roomId, members, onClose, onAdded, exp
         ? f.splitAmong.filter(x => x !== id)
         : [...f.splitAmong, id],
     }))
+
+  // Switching to custom mode the first time (nothing stored) seeds every
+  // selected member into the auto pool so they see an equal distribution to
+  // tweak — not a bunch of empty inputs.
+  const switchSplitMode = (nextMode) =>
+    setForm(f => {
+      if (nextMode === 'custom'
+        && Object.keys(f.customSplits).length === 0
+        && f.autoFilledUids.length === 0
+        && f.splitAmong.length > 0) {
+        return { ...f, splitMode: nextMode, autoFilledUids: [...f.splitAmong] }
+      }
+      return { ...f, splitMode: nextMode }
+    })
+
+  // Typing in a field makes it manual (removes it from the auto-fill set).
+  const updateCustomSplit = (userId, value) =>
+    setForm(f => ({
+      ...f,
+      customSplits: { ...f.customSplits, [userId]: value.replace(/[^0-9.]/g, '') },
+      autoFilledUids: f.autoFilledUids.filter(x => x !== userId),
+    }))
+
+  // Mark remaining empty slots as auto-filled; the computed layer handles the math
+  // so later edits automatically re-balance.
+  const quickFillRemaining = () => {
+    const emptyUserIds = form.splitAmong.filter(uid =>
+      !form.customSplits[uid] && !form.autoFilledUids.includes(uid),
+    )
+    if (emptyUserIds.length === 0) return
+    setForm(f => ({
+      ...f,
+      autoFilledUids: Array.from(new Set([...f.autoFilledUids, ...emptyUserIds])),
+    }))
+  }
 
   const updatePayerRow = (index, patch) =>
     setForm(f => ({
@@ -184,6 +255,10 @@ export default function AddExpenseModal({ roomId, members, onClose, onAdded, exp
       setError(t('addExpense.multiPayerTotalMismatch', { symbol: selectedCurrency.symbol, amount: fmt(Math.abs(payerDiff)) }))
       return
     }
+    if (form.splitMode === 'custom' && Math.abs(splitDiff) >= 0.01) {
+      setError(t('addExpense.splitTotalMismatch', { symbol: selectedCurrency.symbol, amount: fmt(parsedAmount) }))
+      return
+    }
     if (form.paymentMode === 'multiple') {
       const payerIds = form.payerRows.map(row => row.userId).filter(Boolean)
       const positivePayers = form.payerRows.filter(row => row.userId && parseFloat(row.amount || 0) > 0)
@@ -199,6 +274,22 @@ export default function AddExpenseModal({ roomId, members, onClose, onAdded, exp
 
     setLoading(true)
     setError(null)
+
+    const buildSplitRows = (expenseId) => {
+      if (form.splitMode === 'custom') {
+        return form.splitAmong.map(uid => ({
+          expense_id: expenseId,
+          user_id: uid,
+          split_amount: parseFloat(parseFloat(effectiveSplits[uid] || 0).toFixed(2)),
+        }))
+      }
+      const unitAmount = parseFloat(form.amount) / form.splitAmong.length
+      return form.splitAmong.map(uid => ({
+        expense_id: expenseId,
+        user_id: uid,
+        split_amount: parseFloat(unitAmount.toFixed(2)),
+      }))
+    }
 
     const expensePayers = form.paymentMode === 'multiple'
       ? form.payerRows
@@ -221,17 +312,12 @@ export default function AddExpenseModal({ roomId, members, onClose, onAdded, exp
 
     if (import.meta.env.DEV && !hasAuthToken() && roomId.startsWith('local-demo-')) {
       const expenseId = expense?.id || `local-expense-${Date.now()}`
-      const unitAmount = parseFloat(form.amount) / form.splitAmong.length
       const demoExpense = {
         ...payload,
         id: expenseId,
         room_id: roomId,
         created_at: expense?.created_at || new Date().toISOString(),
-        expense_splits: form.splitAmong.map(uid => ({
-          expense_id: expenseId,
-          user_id: uid,
-          split_amount: parseFloat(unitAmount.toFixed(2)),
-        })),
+        expense_splits: buildSplitRows(expenseId),
         expense_payers: expensePayers.map(p => ({ expense_id: expenseId, ...p })),
         users: members.find(m => m.id === form.paidBy),
       }
@@ -268,12 +354,7 @@ export default function AddExpenseModal({ roomId, members, onClose, onAdded, exp
       expenseId = newExp.id
     }
 
-    const unitAmount = parseFloat(form.amount) / form.splitAmong.length
-    const splits = form.splitAmong.map(uid => ({
-      expense_id: expenseId,
-      user_id: uid,
-      split_amount: parseFloat(unitAmount.toFixed(2)),
-    }))
+    const splits = buildSplitRows(expenseId)
 
     const { error: splitErr } = await supabase.from('expense_splits').insert(splits)
     if (splitErr) {
@@ -303,8 +384,12 @@ export default function AddExpenseModal({ roomId, members, onClose, onAdded, exp
     const paidByName = members.find(m => m.id === form.paidBy)?.display_name?.split(' ')[0] || ''
     const lines = [
       `💰 ${isEdit ? t('addExpense.shareUpdated') : ''}${form.title.trim()} ${selectedCurrency.symbol}${fmt(parsedAmount)}`,
-      t('addExpense.sharePaidSplit', { name: paidByName, count: form.splitAmong.length, symbol: selectedCurrency.symbol, amount: fmt(perPerson) }),
     ]
+    if (form.splitMode === 'equal') {
+      lines.push(t('addExpense.sharePaidSplit', { name: paidByName, count: form.splitAmong.length, symbol: selectedCurrency.symbol, amount: fmt(perPerson) }))
+    } else {
+      lines.push(t('addExpense.sharePaidCustom', { name: paidByName, count: form.splitAmong.length }))
+    }
     if (form.note.trim()) lines.push(t('addExpense.shareNote', { note: form.note.trim() }))
     lines.push('— 哇哩 Wari Pay ✅')
     await sendExpenseMessage(lines.join('\n'))
@@ -364,7 +449,7 @@ export default function AddExpenseModal({ roomId, members, onClose, onAdded, exp
                 <LuChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-mid" />
               </div>
             </div>
-            {form.splitAmong.length > 0 && parsedAmount > 0 && (
+            {form.splitAmong.length > 0 && parsedAmount > 0 && form.splitMode === 'equal' && (
               <p className="text-center text-sm text-brand-deep mt-2 font-medium">
                 {t('addExpense.each', { symbol: selectedCurrency.symbol, amount: perPerson })}
               </p>
@@ -460,27 +545,21 @@ export default function AddExpenseModal({ roomId, members, onClose, onAdded, exp
 
           {/* Payment and split */}
           <div className="mb-4 rounded-3xl bg-brand-cream/70 px-3 py-3">
-            <label className="text-xs font-medium text-brand-mid uppercase tracking-wider mb-2 block">{t('addExpense.paymentAndSplit')}</label>
-            <div className="grid grid-cols-2 gap-2 mb-3 rounded-2xl bg-white p-1">
-              {[
-                { key: 'single', label: t('addExpense.singlePayment') },
-                { key: 'multiple', label: t('addExpense.multiplePayment') },
-              ].map(option => (
-                <button
-                  key={option.key}
-                  onClick={() => setForm(f => ({ ...f, paymentMode: option.key }))}
-                  className={`rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
-                    form.paymentMode === option.key ? 'bg-brand-mint/70 text-brand-deep shadow-card' : 'text-brand-mid/70'
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
+            <label className="text-sm font-bold text-brand-deep mb-3 block">{t('addExpense.paymentAndSplit')}</label>
 
             {form.paymentMode === 'single' ? (
               <div className="mb-3">
-                <p className="text-xs font-medium text-brand-mid mb-2">{t('addExpense.paidBy')}</p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-medium text-brand-mid">{t('addExpense.paidBy')}</p>
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, paymentMode: 'multiple' }))}
+                    className="flex items-center gap-1.5 text-xs font-semibold text-brand-mid hover:text-brand-deep"
+                  >
+                    {t('addExpense.enableMultiPayerLink')}
+                    <LuSlidersHorizontal className="w-4 h-4" />
+                  </button>
+                </div>
                 <div className="flex gap-2 flex-wrap">
                   {members.map(m => (
                     <button
@@ -498,7 +577,17 @@ export default function AddExpenseModal({ roomId, members, onClose, onAdded, exp
               </div>
             ) : (
               <div className="mb-3">
-                <p className="text-xs font-medium text-brand-mid mb-2">{t('addExpense.actualPaidByEach')}</p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-medium text-brand-mid">{t('addExpense.actualPaidByEach')}</p>
+                  <button
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, paymentMode: 'single' }))}
+                    className="flex items-center gap-1.5 text-xs font-semibold text-brand-mid hover:text-brand-deep"
+                  >
+                    {t('addExpense.backToSinglePayerLink')}
+                    <LuSlidersHorizontal className="w-4 h-4" />
+                  </button>
+                </div>
                 <div className="space-y-1.5">
                   {form.payerRows.map((row, index) => {
                     const selectedIds = form.payerRows
@@ -548,15 +637,16 @@ export default function AddExpenseModal({ roomId, members, onClose, onAdded, exp
                   <button
                     type="button"
                     onClick={addPayerRow}
-                    className="mt-2 text-sm font-semibold text-brand-mid hover:text-brand-deep"
+                    className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-brand-mid hover:text-brand-deep"
                   >
+                    <LuPlus className="w-4 h-4" />
                     {t('addExpense.addPayer')}
                   </button>
                 )}
                 {parsedAmount > 0 && (
                   <p className={`text-xs mt-2 text-center ${Math.abs(payerDiff) < 0.01 ? 'text-brand-mid/70' : 'text-red-500'}`}>
                     {t('addExpense.payerTotalProgress', { symbol: selectedCurrency.symbol, paid: fmt(payerTotal), total: fmt(parsedAmount) })}
-                    {Math.abs(payerDiff) >= 0.01 && t('addExpense.payerDiff', { symbol: selectedCurrency.symbol, amount: fmt(Math.abs(payerDiff)) })}
+                    {Math.abs(payerDiff) >= 0.01 && t(payerDiff > 0 ? 'addExpense.payerShort' : 'addExpense.payerOver', { symbol: selectedCurrency.symbol, amount: fmt(Math.abs(payerDiff)) })}
                   </p>
                 )}
                 <p className="text-xs text-brand-mid/60 mt-2 leading-relaxed">
@@ -566,28 +656,115 @@ export default function AddExpenseModal({ roomId, members, onClose, onAdded, exp
             )}
 
             <div className="h-px bg-brand-mint/70 my-3" />
-            <label className="text-xs font-medium text-brand-mid mb-2 block">
-              {t('addExpense.splitMembers')}
-              <span className="ml-2 normal-case text-brand-mid/60 font-normal">{t('addExpense.splitHint')}</span>
-            </label>
-            <div className="flex gap-2 flex-wrap">
-              {members.map(m => {
-                const active = form.splitAmong.includes(m.id)
-                return (
-                  <button
-                    key={m.id}
-                    onClick={() => toggleSplit(m.id)}
-                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border transition-colors ${
-                      active ? 'border-brand-mid/50 bg-brand-mint/70 text-brand-deep' : 'border-transparent bg-white text-brand-mid/60 line-through'
-                    }`}
-                  >
-                    <Avatar src={m.picture_url} name={m.display_name} userId={m.id} className="w-6 h-6" />
-                    <span className="text-sm font-medium">{m.display_name.split(' ')[0]}</span>
-                    {active && <LuCheck className="w-3 h-3 text-brand-mid" />}
-                  </button>
-                )
-              })}
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-medium text-brand-mid">
+                {t('addExpense.splitMembers')}
+                {form.splitMode === 'equal' && (
+                  <span className="ml-2 normal-case text-brand-mid/60 font-normal">{t('addExpense.splitHint')}</span>
+                )}
+              </label>
+              <button
+                type="button"
+                onClick={() => switchSplitMode(form.splitMode === 'equal' ? 'custom' : 'equal')}
+                className="flex items-center gap-1.5 text-xs font-semibold text-brand-mid hover:text-brand-deep"
+              >
+                {t(form.splitMode === 'equal' ? 'addExpense.enableCustomSplitLink' : 'addExpense.backToEqualSplitLink')}
+                <LuSlidersHorizontal className="w-4 h-4" />
+              </button>
             </div>
+
+            {form.splitMode === 'equal' ? (
+              <>
+              <div className="flex gap-2 flex-wrap">
+                {members.map(m => {
+                  const active = form.splitAmong.includes(m.id)
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => toggleSplit(m.id)}
+                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border transition-colors ${
+                        active ? 'border-brand-mid/50 bg-brand-mint/70 text-brand-deep' : 'border-transparent bg-white text-brand-mid/60 line-through'
+                      }`}
+                    >
+                      <Avatar src={m.picture_url} name={m.display_name} userId={m.id} className="w-6 h-6" />
+                      <span className="text-sm font-medium">{m.display_name.split(' ')[0]}</span>
+                      {active && <LuCheck className="w-3 h-3 text-brand-mid" />}
+                    </button>
+                  )
+                })}
+              </div>
+              </>
+            ) : (
+              <div className="space-y-1.5">
+                <p className="text-xs text-brand-mid/70 leading-relaxed px-1 pb-1">
+                  {t('addExpense.splitCustomHint')}
+                </p>
+                {members.map(m => {
+                  const active = form.splitAmong.includes(m.id)
+                  return (
+                    <div key={m.id} className="grid grid-cols-[auto_1fr_140px] items-center gap-2 bg-white rounded-2xl px-2 py-1">
+                      <button
+                        type="button"
+                        onClick={() => toggleSplit(m.id)}
+                        aria-label={m.display_name}
+                        className="w-9 h-9 flex items-center justify-center -ml-0.5"
+                      >
+                        <span className={`w-6 h-6 rounded-md border flex items-center justify-center transition-colors ${
+                          active ? 'bg-brand-deep border-brand-deep text-white' : 'border-brand-mid/40 bg-white'
+                        }`}>
+                          {active && <LuCheck className="w-4 h-4" />}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleSplit(m.id)}
+                        className="flex items-center gap-2 min-w-0 py-2 pr-1 text-left"
+                      >
+                        <Avatar src={m.picture_url} name={m.display_name} userId={m.id} className="w-7 h-7 shrink-0" />
+                        <span className={`text-sm font-medium truncate ${active ? 'text-brand-deep' : 'text-brand-mid/50'}`}>
+                          {m.display_name.split(' ')[0]}
+                        </span>
+                      </button>
+                      {active ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-medium text-brand-mid">{selectedCurrency.symbol}</span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={effectiveSplits[m.id] || ''}
+                            onChange={e => updateCustomSplit(m.id, e.target.value)}
+                            placeholder={t('addExpense.splitAmountPlaceholder')}
+                            className={`w-full bg-brand-cream/70 border border-transparent rounded-xl px-3 py-2 text-right text-base focus:border-brand-deep outline-none ${
+                              form.autoFilledUids.includes(m.id) && !form.customSplits[m.id]
+                                ? 'text-brand-mid/70 italic'
+                                : 'text-brand-deep'
+                            }`}
+                          />
+                        </div>
+                      ) : (
+                        <span className="text-xs text-brand-mid/50 text-right pr-2">{t('addExpense.splitNotParticipating')}</span>
+                      )}
+                    </div>
+                  )
+                })}
+                {parsedAmount > 0 && (
+                  <p className={`text-xs mt-2 text-center ${Math.abs(splitDiff) < 0.01 ? 'text-brand-mid/70' : 'text-red-500'}`}>
+                    {t('addExpense.splitTotalProgress', { symbol: selectedCurrency.symbol, allocated: fmt(splitTotal), total: fmt(parsedAmount) })}
+                    {Math.abs(splitDiff) >= 0.01 && t(splitDiff > 0 ? 'addExpense.splitTotalShort' : 'addExpense.splitTotalOver', { symbol: selectedCurrency.symbol, amount: fmt(Math.abs(splitDiff)) })}
+                  </p>
+                )}
+                {parsedAmount > 0 && form.splitAmong.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={quickFillRemaining}
+                    disabled={!hasEmptySplitSlot}
+                    className="mt-2 text-xs font-semibold text-brand-mid hover:text-brand-deep underline underline-offset-2 block mx-auto disabled:opacity-40 disabled:cursor-not-allowed disabled:no-underline"
+                  >
+                    {t('addExpense.splitQuickFillRemaining')}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="space-y-3 mb-4">
@@ -618,7 +795,7 @@ export default function AddExpenseModal({ roomId, members, onClose, onAdded, exp
 
           <button
             onClick={handleSubmit}
-            disabled={loading}
+            disabled={loading || !isCustomSplitValid}
             className="w-full bg-brand-lime text-brand-deep font-bold py-4 rounded-2xl text-lg hover:brightness-95 transition disabled:opacity-60 flex items-center justify-center gap-2"
           >
             {loading ? t('addExpense.saving') : <><LuCheck className="w-5 h-5" /> {isEdit ? t('addExpense.saveEdit') : t('addExpense.submit')}</>}
