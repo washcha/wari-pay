@@ -56,15 +56,20 @@ export default function Home() {
   const executeDeleteAccount = async () => {
     setDeletingAccount(true)
     try {
-      const { data: { session } } = await supabase.auth.getSession()
+      const token = localStorage.getItem('roomiepay_token')
+      if (!token) throw new Error('No auth token')
       const res = await fetch('/api/delete-account', {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${session?.access_token}` },
+        headers: { Authorization: `Bearer ${token}` },
       })
-      if (!res.ok) throw new Error('Delete failed')
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || `HTTP ${res.status}`)
+      }
       await signOut()
-    } catch {
-      alert(t('home.deleteAccountError'))
+    } catch (err) {
+      console.error('[delete-account]', err)
+      alert(`${t('home.deleteAccountError')}\n\n${err.message}`)
       setDeletingAccount(false)
     }
   }
