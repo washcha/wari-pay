@@ -52,6 +52,10 @@ export default function PrivacyPolicy() {
                 {t('privacyPage.lineBody')}
               </p>
               <p>
+                <strong className="text-brand-deep">{t('privacyPage.googleTitle')}</strong><br />
+                {t('privacyPage.googleBody')}
+              </p>
+              <p>
                 <strong className="text-brand-deep">{t('privacyPage.contentTitle')}</strong><br />
                 {t('privacyPage.contentBody')}
               </p>
@@ -68,6 +72,7 @@ export default function PrivacyPolicy() {
               <p>{t('privacyPage.supabase')}</p>
               <p>{t('privacyPage.vercel')}</p>
               <p>{t('privacyPage.line')}</p>
+              <p>{t('privacyPage.google')}</p>
             </div>
             <p className="text-brand-mid/50 text-xs">
               {t('privacyPage.noSale')}
