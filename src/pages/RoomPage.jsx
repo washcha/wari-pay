@@ -53,7 +53,7 @@ export default function RoomPage() {
         base_currency: 'TWD',
         created_at: new Date().toISOString(),
       }
-      setMembers([
+      const demoMembers = [
         user,
         { id: 'local-demo-friend', display_name: '有順', picture_url: null },
         { id: 'local-demo-friend-2', display_name: '小安', picture_url: null },
@@ -61,8 +61,37 @@ export default function RoomPage() {
         { id: 'local-demo-friend-4', display_name: 'Ren', picture_url: null },
         { id: 'local-demo-friend-5', display_name: 'Emma', picture_url: null },
         { id: 'local-demo-friend-6', display_name: 'Jiho', picture_url: null },
-      ])
+      ]
+      setMembers(demoMembers)
       setRoom(demoRoom)
+
+      const expKey = `roomiepay_demo_expenses_${roomId}`
+      const existing = JSON.parse(localStorage.getItem(expKey) || '[]')
+      if (existing.length === 0 && user?.id) {
+        const U = user.id
+        const F1 = 'local-demo-friend', F2 = 'local-demo-friend-2', F3 = 'local-demo-friend-3'
+        const mk = (date, paidBy, amount, split, category = 'food') => {
+          const id = `local-expense-${Math.random().toString(36).slice(2, 10)}`
+          const per = Math.round(amount / split.length)
+          return {
+            id, room_id: roomId, paid_by: paidBy, amount, exchange_rate: 1,
+            category, expense_date: date, note: null, currency: 'TWD',
+            created_at: new Date(date + 'T10:00:00Z').toISOString(),
+            expense_splits: split.map(u => ({ expense_id: id, user_id: u, split_amount: per })),
+            expense_payers: [{ expense_id: id, user_id: paidBy, amount_paid: amount }],
+            users: demoMembers.find(m => m.id === paidBy) || null,
+          }
+        }
+        const seeded = [
+          mk('2026-10-02', U,  5000, [U, F1, F2, F3], 'housing'),
+          mk('2026-10-03', F1, 3000, [U, F1, F2, F3], 'food'),
+          mk('2026-10-04', F2, 2400, [U, F2], 'transport'),
+          mk('2026-10-05', F3, 1200, [U, F1, F2, F3], 'food'),
+          mk('2026-09-15', U,  1000, [U, F1], 'food'),
+        ]
+        localStorage.setItem(expKey, JSON.stringify(seeded))
+      }
+
       setLoading(false)
       return
     }
@@ -265,6 +294,40 @@ export default function RoomPage() {
 
       {showInvite && (
         <InviteSheet roomId={roomId} roomName={room.name} onClose={() => setShowInvite(false)} />
+      )}
+
+      {import.meta.env.DEV && roomId.startsWith('local-demo-') && (
+        <button
+          onClick={() => {
+            const U = user.id
+            const F1 = 'local-demo-friend', F2 = 'local-demo-friend-2', F3 = 'local-demo-friend-3'
+            const mk = (date, paidBy, amount, split, category = 'food') => {
+              const id = `local-expense-${Math.random().toString(36).slice(2, 10)}`
+              const per = Math.round(amount / split.length)
+              return {
+                id, room_id: roomId, paid_by: paidBy, amount, exchange_rate: 1,
+                category, expense_date: date, note: null, currency: 'TWD',
+                created_at: new Date(date + 'T10:00:00Z').toISOString(),
+                expense_splits: split.map(u => ({ expense_id: id, user_id: u, split_amount: per })),
+                expense_payers: [{ expense_id: id, user_id: paidBy, amount_paid: amount }],
+                users: members.find(m => m.id === paidBy) || null,
+              }
+            }
+            const expenses = [
+              mk('2026-10-02', U,  5000, [U, F1, F2, F3], 'housing'),
+              mk('2026-10-03', F1, 3000, [U, F1, F2, F3], 'food'),
+              mk('2026-10-04', F2, 2400, [U, F2], 'transport'),
+              mk('2026-10-05', F3, 1200, [U, F1, F2, F3], 'food'),
+              mk('2026-09-15', U,  1000, [U, F1], 'food'),
+            ]
+            localStorage.setItem(`roomiepay_demo_expenses_${roomId}`, JSON.stringify(expenses))
+            alert(`已塞 ${expenses.length} 筆 expense\nuser.id=${U}\n切結算 tab 看 2026-10`)
+            location.reload()
+          }}
+          className="fixed bottom-4 right-4 z-50 bg-pink-500 text-white text-xs font-bold px-3 py-2 rounded-full shadow-lg hover:bg-pink-600"
+        >
+          🧪 重設測試資料
+        </button>
       )}
     </div>
   )

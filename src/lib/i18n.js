@@ -326,6 +326,10 @@ export const translations = {
       noReminder: '無需提醒',
       settlePayment: '結清款項 {symbol}{amount}',
       reminderText: 'Hi {name}，{year}年{month}月費用結算 {symbol}{amount} 尚未結清，記得繳喔！',
+      suggestTitle: '全員轉帳建議',
+      suggestSubtitle: '全房間 {count} 筆就能結清',
+      suggestArrow: '付給',
+      memberBreakdownTitle: '成員個別結算',
     },
     settleModal: {
       savedTitle: '已記錄結清！',
@@ -640,6 +644,10 @@ export const translations = {
       noReminder: 'No reminder needed',
       settlePayment: 'Settle {symbol}{amount}',
       reminderText: 'Hi {name}, your {year}/{month} settlement of {symbol}{amount} is still pending. Please pay when you can!',
+      suggestTitle: 'Group settlement plan',
+      suggestSubtitle: '{count} transfers to settle the whole room',
+      suggestArrow: 'pays',
+      memberBreakdownTitle: 'Per-member balance',
     },
     settleModal: {
       savedTitle: 'Settlement recorded!',
@@ -954,6 +962,10 @@ export const translations = {
       noReminder: 'リマインダー不要',
       settlePayment: '精算する {symbol}{amount}',
       reminderText: 'Hi {name}、{year}年{month}月の精算 {symbol}{amount} が未完了です。支払いをお願いします！',
+      suggestTitle: '全員の振込プラン',
+      suggestSubtitle: 'ルーム全体を {count} 回の振込で精算',
+      suggestArrow: 'へ',
+      memberBreakdownTitle: 'メンバー別精算',
     },
     settleModal: {
       savedTitle: '精算を記録しました！',
@@ -1268,6 +1280,10 @@ export const translations = {
       noReminder: '알림 필요 없음',
       settlePayment: '정산하기 {symbol}{amount}',
       reminderText: 'Hi {name}, {year}년 {month}월 정산 {symbol}{amount} 이 아직 남아 있어요. 확인 부탁해요!',
+      suggestTitle: '전원 송금 플랜',
+      suggestSubtitle: '방 전체를 {count} 번의 송금으로 정산',
+      suggestArrow: '→',
+      memberBreakdownTitle: '멤버별 정산',
     },
     settleModal: {
       savedTitle: '정산을 기록했어요!',

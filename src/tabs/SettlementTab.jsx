@@ -1,5 +1,5 @@
 import { useState, useEffect, Fragment } from 'react'
-import { LuCheck, LuHandCoins, LuCopy, LuClock } from 'react-icons/lu'
+import { LuCheck, LuHandCoins, LuCopy, LuClock, LuArrowRight } from 'react-icons/lu'
 import { supabase } from '../lib/supabase'
 import { useApp } from '../contexts/AppContext'
 import Avatar from '../components/Avatar'
@@ -16,6 +16,22 @@ const CURRENCY_SYMBOLS = {
 function currentMonth() {
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
+function buildTransferSuggestions(entries) {
+  const debtors = entries.filter(e => e.amount < -1).map(e => ({ ...e, amount: -e.amount })).sort((a, b) => b.amount - a.amount)
+  const creditors = entries.filter(e => e.amount > 1).map(e => ({ ...e })).sort((a, b) => b.amount - a.amount)
+  const out = []
+  let i = 0, j = 0
+  while (i < debtors.length && j < creditors.length) {
+    const amt = Math.min(debtors[i].amount, creditors[j].amount)
+    out.push({ from: debtors[i], to: creditors[j], amount: amt })
+    debtors[i].amount -= amt
+    creditors[j].amount -= amt
+    if (debtors[i].amount < 1) i++
+    if (creditors[j].amount < 1) j++
+  }
+  return out
 }
 
 const addPaidAmount = (paid, expense, rate) => {
@@ -208,6 +224,38 @@ export default function SettlementTab({ roomId, members, roomCurrency = 'TWD' })
       {loading ? (
         <div className="flex justify-center py-16"><img src={waripayLoading} alt="loading" className="w-20 h-20 animate-bounce" /></div>
       ) : (
+        <>
+        {(() => {
+          const effectiveEntries = balances.map(b => {
+            const payment = payments.find(p => p.payer_id === b.id)
+            const newDelta = (b.balance < -1 && payment) ? getNewDelta(b.id, payment.created_at) : 0
+            const amount = (payment && newDelta < -1) ? newDelta : (payment && b.balance < -1 ? 0 : b.balance)
+            return { id: b.id, display_name: b.display_name, picture_url: b.picture_url, amount }
+          })
+          const suggestions = buildTransferSuggestions(effectiveEntries)
+          if (suggestions.length < 2) return null
+          return (
+            <div className="bg-white rounded-3xl p-5 shadow-soft mb-4 border border-brand-mint/60">
+              <div className="flex items-baseline justify-between mb-3">
+                <h3 className="font-bold text-brand-deep">{t('settlement.suggestTitle')}</h3>
+                <span className="text-xs text-brand-mid/70">{t('settlement.suggestSubtitle', { count: suggestions.length })}</span>
+              </div>
+              <div className="space-y-2">
+                {suggestions.map((s, idx) => (
+                  <div key={idx} className="flex items-center gap-2 py-2 border-b border-brand-mint/30 last:border-0">
+                    <Avatar src={s.from.picture_url} name={s.from.display_name} userId={s.from.id} className="w-7 h-7" />
+                    <span className="text-sm font-medium text-brand-deep truncate max-w-[25%]">{s.from.display_name}</span>
+                    <LuArrowRight className="w-4 h-4 text-brand-mid/50 flex-shrink-0" />
+                    <Avatar src={s.to.picture_url} name={s.to.display_name} userId={s.to.id} className="w-7 h-7" />
+                    <span className="text-sm font-medium text-brand-deep truncate max-w-[25%]">{s.to.display_name}</span>
+                    <span className="ml-auto text-sm font-bold text-brand-deep flex-shrink-0">{symbol}{formatDisplayAmount(s.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
+        <h3 className="font-bold text-brand-deep text-sm mb-2 px-1">{t('settlement.memberBreakdownTitle')}</h3>
         <div className="space-y-3">
           {balances.map(b => {
             const isMe = b.id === user.id
@@ -339,6 +387,7 @@ export default function SettlementTab({ roomId, members, roomCurrency = 'TWD' })
             )
           })}
         </div>
+        </>
       )}
 
       {settlingCard && (
