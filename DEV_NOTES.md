@@ -22,7 +22,7 @@
 |----|------|
 | 前端 | React 18 + Vite 5 + Tailwind CSS 3 |
 | 後端 / DB | Supabase（PostgreSQL + REST API） |
-| 認證 | LINE LIFF v2（`@line/liff ^2.22.3`） |
+| 認證 | LINE LIFF v2（`@line/liff 2.31.2`） |
 | 部署 | Vercel |
 
 **本機路徑：** `/Users/cc.hsien/work/roomiepay/`

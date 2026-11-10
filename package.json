@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@line/liff": "^2.22.3",
+    "@line/liff": "2.31.2",
     "@supabase/supabase-js": "^2.39.0",
     "@vercel/analytics": "^2.0.1",
     "disposable-email-domains": "^1.0.62",
