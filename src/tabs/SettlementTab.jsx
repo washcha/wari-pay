@@ -191,6 +191,12 @@ export default function SettlementTab({ roomId, members, roomCurrency = 'TWD' })
 
   const roomTotal = balances.reduce((s, b) => s + b.paid, 0)
   const myBalance = balances.find(b => b.id === user.id)
+  const getOutstandingBalance = (balance) => {
+    const payment = payments.find(p => p.payer_id === balance.id)
+    if (!payment) return balance.balance
+    return getNewDelta(balance.id, payment.created_at)
+  }
+  const myOutstanding = myBalance && getOutstandingBalance(myBalance)
 
   return (
     <div className="p-4 pb-24">
@@ -208,15 +214,15 @@ export default function SettlementTab({ roomId, members, roomCurrency = 'TWD' })
           <p className="text-brand-mid text-xs uppercase tracking-widest">{t('settlement.monthlyTotal', { currency: t(`expenses.currency${roomCurrency}`) || roomCurrency })}</p>
           <p className="text-4xl font-bold text-brand-deep mt-1">{symbol} {formatDisplayAmount(roomTotal)}</p>
         </div>
-        {myBalance && Math.abs(myBalance.balance) >= 1 && (
+        {myBalance && Math.abs(myOutstanding) >= 1 && (
           <div className={`mt-4 p-3 rounded-2xl text-sm text-center font-medium ${
-            myBalance.balance > 0
+            myOutstanding > 0
               ? 'bg-brand-lime text-brand-deep'
               : 'bg-white text-red-600'
           }`}>
-            {myBalance.balance > 0
-              ? t('settlement.myCredit', { symbol, amount: formatDisplayAmount(myBalance.balance) })
-              : t('settlement.myDebt', { symbol, amount: formatDisplayAmount(Math.abs(myBalance.balance)) })}
+            {myOutstanding > 0
+              ? t('settlement.myCredit', { symbol, amount: formatDisplayAmount(myOutstanding) })
+              : t('settlement.myDebt', { symbol, amount: formatDisplayAmount(Math.abs(myOutstanding)) })}
           </div>
         )}
       </div>
@@ -227,10 +233,7 @@ export default function SettlementTab({ roomId, members, roomCurrency = 'TWD' })
         <>
         {(() => {
           const effectiveEntries = balances.map(b => {
-            const payment = payments.find(p => p.payer_id === b.id)
-            const newDelta = (b.balance < -1 && payment) ? getNewDelta(b.id, payment.created_at) : 0
-            const amount = (payment && newDelta < -1) ? newDelta : (payment && b.balance < -1 ? 0 : b.balance)
-            return { id: b.id, display_name: b.display_name, picture_url: b.picture_url, amount }
+            return { id: b.id, display_name: b.display_name, picture_url: b.picture_url, amount: getOutstandingBalance(b) }
           })
           const suggestions = buildTransferSuggestions(effectiveEntries)
           if (suggestions.length < 2) return null
@@ -265,6 +268,7 @@ export default function SettlementTab({ roomId, members, roomCurrency = 'TWD' })
 
             const newDelta = (!pos && !zero && payment) ? getNewDelta(b.id, payment.created_at) : 0
             const hasNewDebt = newDelta < -1
+            const outstanding = payment ? getOutstandingBalance(b) : b.balance
 
             if (hasNewDebt) {
               return (
@@ -352,19 +356,19 @@ export default function SettlementTab({ roomId, members, roomCurrency = 'TWD' })
                     </div>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <p className={`font-bold text-xl ${b.balance > 0 ? 'text-brand-deep' : b.balance < -1 ? 'text-red-500' : 'text-brand-mid/50'}`}>
-                      {b.balance > 0 ? '＋' : b.balance < -1 ? '−' : '±'}{symbol}{formatDisplayAmount(Math.abs(b.balance))}
+                    <p className={`font-bold text-xl ${outstanding > 1 ? 'text-brand-deep' : outstanding < -1 ? 'text-red-500' : 'text-brand-mid/50'}`}>
+                      {outstanding > 1 ? '＋' : outstanding < -1 ? '−' : '±'}{symbol}{formatDisplayAmount(Math.abs(outstanding))}
                     </p>
                     <p className="text-xs text-brand-mid/60 mt-1">
-                      {b.balance > 0 ? t('settlement.receivable') : b.balance < -1 ? t('settlement.needPay') : t('settlement.settled')}
+                      {outstanding > 1 ? t('settlement.receivable') : outstanding < -1 ? t('settlement.needPay') : t('settlement.settled')}
                     </p>
                   </div>
                 </div>
 
                 <div className="mt-3 border-t border-brand-mint/60 pt-3 flex items-center justify-between">
-                  {b.balance > 0 ? (
+                  {outstanding > 1 ? (
                     <button
-                      onClick={() => copyReminder(b)}
+                      onClick={() => copyReminder({ ...b, balance: outstanding })}
                       className="text-xs text-brand-deep font-medium flex items-center gap-1.5 hover:underline"
                     >
                       <LuCopy className="w-3.5 h-3.5" />
@@ -374,15 +378,26 @@ export default function SettlementTab({ roomId, members, roomCurrency = 'TWD' })
                     <span className="text-xs text-brand-mid/50">{t('settlement.noReminder')}</span>
                   )}
 
-                  {b.balance < -1 && isMe && (
+                  {outstanding < -1 && isMe && (
                     <button
-                      onClick={() => setSettlingCard({ ...b, balance: b.balance })}
+                      onClick={() => setSettlingCard({ ...b, balance: outstanding, isNewDebt: !!payment })}
                       className="bg-brand-lime text-brand-deep font-semibold px-3.5 py-2 rounded-2xl text-xs hover:brightness-95 active:scale-95 transition flex items-center gap-1.5"
                     >
-                      <LuHandCoins className="w-4 h-4" /> {t('settlement.settlePayment', { symbol, amount: formatDisplayAmount(Math.abs(b.balance)) })}
+                        <LuHandCoins className="w-4 h-4" /> {t('settlement.settlePayment', { symbol, amount: formatDisplayAmount(Math.abs(outstanding)) })}
                     </button>
                   )}
                 </div>
+                {payment && (
+                  <div className="mt-3 border-t border-brand-mint/60 pt-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-brand-deep flex items-center gap-1">
+                        <LuCheck className="w-3.5 h-3.5" /> {t('settlement.recordedSettled', { symbol, amount: formatRawAmount(payment.amount) })}
+                      </span>
+                      <span className="text-xs text-brand-mid/50">{new Date(payment.created_at).toLocaleDateString(language)}</span>
+                    </div>
+                    {payment.note && <p className="text-xs text-brand-mid mt-1">{payment.note}</p>}
+                  </div>
+                )}
               </div>
             )
           })}
